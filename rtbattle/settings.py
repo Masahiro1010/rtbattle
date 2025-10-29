@@ -1,5 +1,5 @@
 from pathlib import Path
-import os
+import os, urllib.parse as up
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key")
@@ -49,12 +49,31 @@ TEMPLATES = [{
 ASGI_APPLICATION = "rtbattle.asgi.application"   # Channels用
 
 # Channels / Redis
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels_redis.core.RedisChannelLayer",
-        "CONFIG": {"hosts": [os.getenv("REDIS_URL", "redis://127.0.0.1:6379")]},
+REDIS_URL = os.getenv("REDIS_URL", "")
+
+if REDIS_URL:
+    u = up.urlparse(REDIS_URL)
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {
+                "hosts": [{
+                    "address": (u.hostname, u.port or 6379),
+                    "password": u.password,   # ← default:**** が入る
+                    "ssl": True,              # TLSを明示
+                    "ssl_cert_reqs": None,    # 証明書検証を無効化（必要な場合）
+                }]
+            },
+        }
     }
-}
+else:
+    # ローカル開発 fallback
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {"hosts": ["redis://127.0.0.1:6379"]},
+        }
+    }
 
 # 日本時間にするなら
 TIME_ZONE = "Asia/Tokyo"
