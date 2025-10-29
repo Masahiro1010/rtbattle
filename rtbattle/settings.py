@@ -57,7 +57,6 @@ if REDIS_URL:
             "BACKEND": "channels_redis.core.RedisChannelLayer",
             "CONFIG": {
                 "hosts": [REDIS_URL],      # ← 文字列URLをそのまま
-                "health_check_interval": 30,
                 # 証明書で落ちる場合のみ一時的に：
                 # "ssl_cert_reqs": None,
             },
