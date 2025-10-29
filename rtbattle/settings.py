@@ -52,26 +52,22 @@ ASGI_APPLICATION = "rtbattle.asgi.application"   # Channels用
 REDIS_URL = os.getenv("REDIS_URL", "")
 
 if REDIS_URL:
-    u = up.urlparse(REDIS_URL)
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
             "CONFIG": {
-                "hosts": [{
-                    "address": (u.hostname, u.port or 6379),
-                    "password": u.password,   # ← default:**** が入る
-                    "ssl": True,              # TLSを明示
-                    "ssl_cert_reqs": None,    # 証明書検証を無効化（必要な場合）
-                }]
+                # 文字列URLをそのまま渡す（rediss://... を推奨）
+                "hosts": [REDIS_URL],
+                # 必要なら TLS 検証の緩和（本番は避けたい）
+                # "ssl_cert_reqs": None,
             },
         }
     }
 else:
-    # ローカル開発 fallback
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
-            "CONFIG": {"hosts": ["redis://127.0.0.1:6379"]},
+            "CONFIG": {"hosts": ["redis://127.0.0.1:6379/0"]},
         }
     }
 
