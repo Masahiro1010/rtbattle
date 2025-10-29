@@ -47,8 +47,13 @@ class BattleConsumer(AsyncJsonWebsocketConsumer):
         # 監視タスク（締切 or 両者入力で解決）
         asyncio.create_task(self.turn_watcher())
 
+        await self.send_json({"type": "joined", "room": self.room_code})
+
     async def disconnect(self, code):
-        await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
+        try:
+            await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
+        except Exception:
+            pass
 
     # ===== DBヘルパ =====
     @database_sync_to_async

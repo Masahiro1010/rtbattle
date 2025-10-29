@@ -127,22 +127,22 @@
         };
     
         ws.onclose = () => {
-          log('disconnected');
-          stopCountdown();
-          // 自動再接続（指数バックオフ、最大10秒）
-          setTimeout(connect, Math.min(reconnectDelay, 10000));
-          reconnectDelay *= 2;
+            log('disconnected');
+            stopCountdown();
+            // 自動再接続（指数バックオフ、最大10秒）
+            setTimeout(connect, Math.min(reconnectDelay, 10000));
+            reconnectDelay *= 2;
         };
     
         ws.onmessage = (e) => {
-          const data = JSON.parse(e.data);
+            const data = JSON.parse(e.data);
     
-          if (data.type === 'log') {
-            log(data.text);
-            return;
-          }
+            if (data.type === 'log') {
+                log(data.text);
+                return;
+            }
     
-          if (data.type === 'state') {
+            if (data.type === 'state') {
             // ターンが進んだらUIをリセット
             if (lastState.turn && data.turn && data.turn !== lastState.turn) {
               resetPick();

@@ -1,5 +1,5 @@
 from pathlib import Path
-import os, urllib.parse as up
+import os, urllib.parse as up, re
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key")
@@ -56,9 +56,9 @@ if REDIS_URL:
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
             "CONFIG": {
-                # 文字列URLをそのまま渡す（rediss://... を推奨）
-                "hosts": [REDIS_URL],
-                # 必要なら TLS 検証の緩和（本番は避けたい）
+                "hosts": [REDIS_URL],      # ← 文字列URLをそのまま
+                "health_check_interval": 30,
+                # 証明書で落ちる場合のみ一時的に：
                 # "ssl_cert_reqs": None,
             },
         }
@@ -70,6 +70,11 @@ else:
             "CONFIG": {"hosts": ["redis://127.0.0.1:6379/0"]},
         }
     }
+
+# （任意）起動時にURLをマスク表示して確認したい場合
+def _mask(u: str) -> str:
+    return re.sub(r':([^:@/]{6,})@', r':******@', u)
+print("[boot] REDIS_URL:", _mask(REDIS_URL or "(empty)"))
 
 # 日本時間にするなら
 TIME_ZONE = "Asia/Tokyo"

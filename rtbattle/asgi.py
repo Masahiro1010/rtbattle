@@ -1,19 +1,18 @@
-# rtbattle/asgi.py
+# config/asgi.py
 import os
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "rtbattle.settings")  # ✅ 最初に設定
-
+import django
 from channels.routing import ProtocolTypeRouter, URLRouter
-from django.core.asgi import get_asgi_application
 from channels.auth import AuthMiddlewareStack
-
-django_asgi_app = get_asgi_application()
-
-# settings が効いた後で arena のroutingを import
+from django.core.asgi import get_asgi_application
 from arena import routing as arena_routing
 
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+django.setup()
+
 application = ProtocolTypeRouter({
-    "http": django_asgi_app,
+    "http": get_asgi_application(),
     "websocket": AuthMiddlewareStack(
         URLRouter(arena_routing.websocket_urlpatterns)
     ),
 })
+
