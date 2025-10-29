@@ -1,0 +1,196 @@
+<!doctype html>
+<div id="state">
+<div class="hp">You HP: <span id="hp_me">-</span> <span class="token" id="tk_me" title="チャージトークン">T:<span id="tk_me_v">0</span></span></div>
+<div class="hp">Opponent HP: <span id="hp_op">-</span> <span class="token" id="tk_op" title="チャージトークン">T:<span id="tk_op_v">0</span></span></div>
+<div>Turn: <span id="turn">-</span> / Deadline: <span class="timer" id="deadline">--:--</span></div>
+</div>
+<div class="actions">
+<button id="a_attack">アタック(6)</button>
+<button id="a_guard">ガード</button>
+<button id="a_charge">チャージ</button>
+<button id="a_cattack" class="disabled">チャージ攻撃(15)</button>
+</div>
+<div>選択中: <span id="picked">none</span></div>
+<div class="log" id="log"></div>
+
+<script>
+    (() => {
+      const $ = (id) => document.getElementById(id);
+      const roomCode = "{{ room_code }}";
+    
+      const btns = {
+        attack: $('a_attack'),
+        guard: $('a_guard'),
+        charge: $('a_charge'),
+        cattack: $('a_cattack'),
+      };
+    
+      const ui = {
+        hpMe: $('hp_me'),
+        hpOp: $('hp_op'),
+        turn: $('turn'),
+        deadline: $('deadline'),
+        tkMe: $('tk_me_v'),
+        tkOp: $('tk_op_v'),
+        picked: $('picked'),
+        log: $('log'),
+      };
+    
+      const log = (t) => {
+        ui.log.innerHTML += `<div>${t}</div>`;
+        ui.log.scrollTop = ui.log.scrollHeight;
+      };
+    
+      // ---- state on client ----
+      let ws = null;
+      let myPick = 'none';
+      let lastSent = '';
+      let lastState = { turn: 0, finished: false, deadline: null };
+      let countdownTimer = null;
+      let reconnectDelay = 500; // ms (backoff)
+    
+      const fmtDeadline = (ts) => {
+        const d = new Date(ts);
+        const mm = String(d.getMinutes()).padStart(2, '0');
+        const ss = String(d.getSeconds()).padStart(2, '0');
+        return `${mm}:${ss}`;
+      };
+    
+      const startCountdown = (isoTs) => {
+        stopCountdown();
+        if (!isoTs) return;
+        const deadlineMs = new Date(isoTs).getTime();
+        countdownTimer = setInterval(() => {
+          const remain = Math.max(0, Math.floor((deadlineMs - Date.now()) / 1000));
+          const mm = String(Math.floor(remain / 60)).padStart(2, '0');
+          const ss = String(remain % 60).padStart(2, '0');
+          ui.deadline.textContent = `${mm}:${ss}`;
+          if (remain <= 0) stopCountdown();
+        }, 200);
+      };
+    
+      const stopCountdown = () => {
+        if (countdownTimer) {
+          clearInterval(countdownTimer);
+          countdownTimer = null;
+        }
+      };
+    
+      const setEnabled = (el, enabled) => {
+        el.classList.toggle('disabled', !enabled);
+        el.disabled = !enabled;
+      };
+    
+      const setActionsEnabled = (enabled, tokens = 0, finished = false) => {
+        const can = enabled && !finished;
+        setEnabled(btns.attack, can);
+        setEnabled(btns.guard,  can);
+        setEnabled(btns.charge, can);
+        setEnabled(btns.cattack, can && tokens > 0);
+      };
+    
+      const resetPick = () => {
+        myPick = 'none';
+        ui.picked.textContent = 'none';
+        lastSent = '';
+      };
+    
+      const sendAction = (a) => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        // 同じ内容を連打してもサーバ負荷を上げない
+        if (lastSent === a) return;
+        lastSent = a;
+        myPick = a;
+        ui.picked.textContent = a;
+        ws.send(JSON.stringify({ type: 'action', action: a }));
+      };
+    
+      // --- button events ---
+      btns.attack.onclick = () => sendAction('attack');
+      btns.guard.onclick  = () => sendAction('guard');
+      btns.charge.onclick = () => sendAction('charge');
+      btns.cattack.onclick= () => sendAction('charged_attack');
+    
+      // --- websocket lifecycle ---
+      const wsURL = () => {
+        // http(s)://host → ws(s)://host に置換
+        const base = window.location.origin.replace(/^http/, 'ws');
+        return `${base}/ws/arena/${roomCode}/`;
+      };
+    
+      const connect = () => {
+        ws = new WebSocket(wsURL());
+    
+        ws.onopen = () => {
+          log('connected');
+          reconnectDelay = 500; // reset backoff
+        };
+    
+        ws.onclose = () => {
+          log('disconnected');
+          stopCountdown();
+          // 自動再接続（指数バックオフ、最大10秒）
+          setTimeout(connect, Math.min(reconnectDelay, 10000));
+          reconnectDelay *= 2;
+        };
+    
+        ws.onmessage = (e) => {
+          const data = JSON.parse(e.data);
+    
+          if (data.type === 'log') {
+            log(data.text);
+            return;
+          }
+    
+          if (data.type === 'state') {
+            // ターンが進んだらUIをリセット
+            if (lastState.turn && data.turn && data.turn !== lastState.turn) {
+              resetPick();
+              log(`Turn ${data.turn} start`);
+            }
+    
+            ui.hpMe.textContent = data.you.hp;
+            ui.hpOp.textContent = data.op.hp;
+            ui.turn.textContent = data.turn;
+            ui.tkMe.textContent = data.you.tokens;
+            ui.tkOp.textContent = data.op.tokens;
+    
+            // デッドライン（ISO文字列想定）を反映＆カウントダウン開始
+            if (data.deadline) {
+              ui.deadline.textContent = fmtDeadline(data.deadline);
+              startCountdown(data.deadline);
+            }
+    
+            // アクションボタンの有効/無効
+            setActionsEnabled(true, data.you.tokens, data.finished);
+    
+            if (data.finished) {
+              const msg =
+                data.winner === data.you.index
+                  ? 'あなたの勝ち！'
+                  : (data.winner === null ? '引き分け' : 'あなたの負け…');
+              log(msg);
+              setActionsEnabled(false, 0, true);
+              stopCountdown();
+            }
+    
+            lastState = {
+              turn: data.turn,
+              finished: !!data.finished,
+              deadline: data.deadline || null,
+            };
+          }
+        };
+      };
+    
+      // ページ離脱時はソケットをクローズ（任意）
+      window.addEventListener('beforeunload', () => {
+        try { ws && ws.close(); } catch (_) {}
+      });
+    
+      // kick
+      connect();
+    })();
+    </script>
+</body>
+</html>
