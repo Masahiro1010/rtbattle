@@ -48,17 +48,31 @@ TEMPLATES = [{
 
 ASGI_APPLICATION = "rtbattle.asgi.application"   # Channels用
 
-# Channels / Redis
 REDIS_URL = os.getenv("REDIS_URL", "")
+
+def _host_entry(url: str):
+    u = up.urlparse(url)
+    entry = {
+        "address": url,                 # ← URL文字列をそのまま
+        "retry_on_timeout": True,
+        "socket_timeout": 5,            # 操作のタイムアウト
+        "socket_connect_timeout": 5,    # 接続のタイムアウト
+        "socket_keepalive": True,       # TCP keepalive
+    }
+    # rediss:// の時だけTLS系を扱う（まずは厳格。必要なら一時的に緩和）
+    if u.scheme == "rediss":
+        # entry["ssl_cert_reqs"] = None  # ← 証明書で落ちる時の “一時” 回避（恒久NG）
+        pass
+    return entry
 
 if REDIS_URL:
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
             "CONFIG": {
-                "hosts": [REDIS_URL],      # ← 文字列URLをそのまま
-                # 証明書で落ちる場合のみ一時的に：
-                # "ssl_cert_reqs": None,
+                "hosts": [_host_entry(REDIS_URL)],  # ← dictで渡す
+                # "capacity": 1500,   # 必要なら調整
+                # "expiry": 10,
             },
         }
     }
@@ -70,7 +84,7 @@ else:
         }
     }
 
-# （任意）起動時にURLをマスク表示して確認したい場合
+# 起動ログ（マスク）
 def _mask(u: str) -> str:
     return re.sub(r':([^:@/]{6,})@', r':******@', u)
 print("[boot] REDIS_URL:", _mask(REDIS_URL or "(empty)"))
