@@ -21,7 +21,7 @@ class BattleConsumer(AsyncJsonWebsocketConsumer):
         # 部屋コード
         self.room_code = self.scope["url_route"]["kwargs"]["room_code"]
 
-        # セッションが無くても匿名IDで続行できるようにする
+        # セッションが無くても匿名IDで続行
         session = self.scope.get("session", None)
         if session is not None:
             pid = session.get("pid")
@@ -34,19 +34,51 @@ class BattleConsumer(AsyncJsonWebsocketConsumer):
             # セッションミドルウェア不在時のフォールバック
             self.player_id = secrets.token_hex(16)
 
-        # ルームごとのWSグループ
+        # ルームごとのWSグループ名
         self.room_group_name = f"arena_{self.room_code}"
 
-        await self.channel_layer.group_add(self.room_group_name, self.channel_name)
+        # まずはRedis(=Channel Layer)に参加を試みる
+        try:
+            # ハング防止のため一応タイムアウトをつける（任意）
+            await asyncio.wait_for(
+                self.channel_layer.group_add(self.room_group_name, self.channel_name),
+                timeout=5
+            )
+        except Exception as e:
+            # 参加に失敗した場合は、いったん受理→理由を返して→閉じる
+            await self.accept()
+            await self.send_json({
+                "type": "error",
+                "reason": "channel_layer_unavailable",
+                "detail": str(e)[:500],  # ログ用に短く
+            })
+            await self.close(code=1011)  # 1011: server error
+            return
+
+        # ここまで来たら参加OK
         await self.accept()
 
-        # 参加処理 & 現在ターンの存在を保証
-        await self.join_room()
-        await self.send_state("joined")
+        # ロビー参加処理 & 現在ターンの存在保証
+        try:
+            await self.join_room()
+            await self.send_state("joined")
+        except Exception as e:
+            # 何かあってもグループを掃除して閉じる
+            await self.send_json({
+                "type": "error",
+                "reason": "init_failed",
+                "detail": str(e)[:500],
+            })
+            try:
+                await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
+            finally:
+                await self.close(code=1011)
+            return
 
         # 監視タスク（締切 or 両者入力で解決）
-        asyncio.create_task(self.turn_watcher())
+        self._turn_task = asyncio.create_task(self.turn_watcher())
 
+        # クライアント用の軽い合図
         await self.send_json({"type": "joined", "room": self.room_code})
 
     async def disconnect(self, code):
